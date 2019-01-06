@@ -64,10 +64,15 @@ done
 # now we create the subdirectories
 	(
 	cd $ROOTDIR/experiments || _error "Can't cd: $ROOTDIR/experiments"
-	./create-dir-script
+	if [ ! -d AlgorithmTesting ]; then
+		./create-dir-script
+		if [ $? -ne 0 ]; then
+			echo "$PNAME: some diretory creations failed; this probably isn't a problem, but please check!"
+		fi
+	fi
 	) || exit $?
 
-echo "Now change directory to $ROOTDIR and say 'make'!"
+echo "Directories are set up. Change directory to $ROOTDIR and say 'make'!"
 
 exit 0
 
