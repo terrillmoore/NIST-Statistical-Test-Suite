@@ -50,3 +50,8 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# directories that are not interesting and build artifacts
+sts/experiments
+sts/obj
+sts/assess
