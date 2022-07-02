@@ -88,7 +88,7 @@ for i in "${SUBDIRS[@]}" ; do
 	fi
 done
 
-echo "Creating the subdirectories via child script."
+echo "Creating the subdirectories via $ROOTDIR/experiments/create-dir-script."
 	(
 	cd "$ROOTDIR/experiments" || _error "Can't cd: $ROOTDIR/experiments"
 	# this is a hack; we use the first directory created by create-dir-script
@@ -97,7 +97,7 @@ echo "Creating the subdirectories via child script."
 		if ! ./create-dir-script; then
 			echo "$PNAME: some directory creations failed; this probably isn't a problem, but please check!"
 		else
-			echo "Child script succeeded."
+			echo "create-dir-script succeeded."
 		fi
 	else
 		echo "Skipping create-dir-script. It appears that it was already run?"
