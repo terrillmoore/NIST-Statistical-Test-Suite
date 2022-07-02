@@ -1,35 +1,49 @@
 # The NIST Statistical Test Suite
 
-This repository contains the code for testing random number generators published by the US National Institute of Science and Technology (NIST). The code was created to accompany NIST SP-800-22 R1a, a copy of which can be found in this repository as [nistspecialpublication800-22r1a.pdf][1] (ref \[1]).
+This repository contains the code for testing random number generators published by the US National Institute of Science and Technology (NIST). The code was created to accompany NIST SP-800-22 R1a, a copy of which can be found in this repository as [`nistspecialpublication800-22r1a.pdf`][1] (ref \[1]).
 
 [1]: (assets/nistspecialpublication800-22r1a.pdf)
 
-Given that this is rather useful code, and that it was unavailble in January 2019 due to the US government shutdown, I thought it would be useful to publish this for reference. (Call to action for civic hackers: we need a curated site that links to this kind of material.)
+Given that this is rather useful code, and that it was unavailable in January 2019 due to the US government shutdown, I thought it would be useful to publish this for reference. (Call to action for civic hackers: we need a curated site that links to this kind of material.)
 
 **Contents:**
-<!-- TOC depthFrom:2 updateOnSave:true -->
+<!-- TOC depthfrom:2 updateonsave:true -->
 
 - [Import structure](#import-structure)
 - [How to build on Ubuntu](#how-to-build-on-ubuntu)
-	- [Sample run for known input](#sample-run-for-known-input)
-	- [Sample test results](#sample-test-results)
+    - [Sample run for known input](#sample-run-for-known-input)
+    - [Sample test results](#sample-test-results)
 - [Notes on using the package](#notes-on-using-the-package)
-	- [Precanned answers](#precanned-answers)
-	- [Result locations](#result-locations)
+    - [Known input data](#known-input-data)
+    - [Result locations](#result-locations)
 - [Anomalies](#anomalies)
 
 <!-- /TOC -->
 
 ## Import structure
 
-So that we can add the usual gitlab sugar and keep clear "what is new here" vs "what came from NIST", the NIST code is in the subdirectory `sts`.
+So that we can add the usual GitHub sugar and keep clear "what is new here" vs "what came from NIST", the NIST code is in the subdirectory `sts`.
 
 ## How to build on Ubuntu
 
-Because git doesn't store empty directories, you need to do some setup after initial checkout. This repo has a script for that, at the top level: `setup.sh`. The setup procedure is:
+Because git doesn't store empty directories, you need to do some setup after initial checkout. This repository has a script for that, at the top level: `setup.sh`. The setup procedure is:
 
 ```console
-$ ./setup.sh 
+$ ./setup.sh
+Setting up directories in ./sts/experiments.
+Created ./sts/obj.
+Created ./sts/experiments/AlgorithmTesting.
+Created ./sts/experiments/BBS.
+Created ./sts/experiments/CCG.
+Created ./sts/experiments/G-SHA1.
+Created ./sts/experiments/LCG.
+Created ./sts/experiments/MODEXP.
+Created ./sts/experiments/MS.
+Created ./sts/experiments/QCG1.
+Created ./sts/experiments/QCG2.
+Created ./sts/experiments/XOR.
+Creating the subdirectories via ./sts/experiments/create-dir-script.
+create-dir-script succeeded.
 Directories are set up. Change directory to ./sts and say 'make'!
 $ cd ./sts
 $ make
@@ -178,7 +192,7 @@ provided in the addendum section of the documentation.
 
 ## Notes on using the package
 
-### Precanned answers
+### Known input data
 
 The top-level directory `test` is intended for test input scripts. Currently defined:
 
@@ -186,7 +200,7 @@ The top-level directory `test` is intended for test input scripts. Currently def
 
 ### Result locations
 
-The results show up in different subdirectories depending on the algorigthm chosen in the first menu. The correspondence is:
+The results show up in different subdirectories depending on the algorithm chosen in the first menu. The correspondence is:
 
 | Choice | Menu Description | Output Location | Output File 
 |:------:|------------------|-----------------|------------|
@@ -222,4 +236,4 @@ I've noted the following:
     $
     ```
 
-3. Several of the generators seem to generate `igamc: UNDERFLOW` errors over and over during the test. These are all generators that fail the tests, so I assume it's due to insufficent randomness. The message comes from function `cephes_igamc()` in file `cephes.c`; this is used many places, and I've not tracked down which test is causing this.
+3. Several of the generators seem to generate `igamc: UNDERFLOW` errors over and over during the test. These are all generators that fail the tests, so I assume it's due to insufficient randomness. The message comes from function `cephes_igamc()` in file `cephes.c`; this is used many places, and I've not tracked down which test is causing this.
