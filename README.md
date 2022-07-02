@@ -14,8 +14,10 @@ Given that this is rather useful code, and that it was unavailable in January 20
     - [Sample run for known input](#sample-run-for-known-input)
     - [Sample test results](#sample-test-results)
 - [Notes on using the package](#notes-on-using-the-package)
-    - [Known input data](#known-input-data)
+    - [Test input scripts](#test-input-scripts)
     - [Result locations](#result-locations)
+    - [Bitstreams, the parameter to assess, and data files](#bitstreams-the-parameter-to-assess-and-data-files)
+    - [Random Number Generators and floating-point data](#random-number-generators-and-floating-point-data)
 - [Anomalies](#anomalies)
 
 <!-- /TOC -->
@@ -192,11 +194,17 @@ provided in the addendum section of the documentation.
 
 ## Notes on using the package
 
-### Known input data
+### Test input scripts
 
-The top-level directory `test` is intended for test input scripts. Currently defined:
+If you are careful, you can supply answers in a text file.
 
-- `tests/data-pi-all-10-streams.txt` contains the inputs used in [Sample run for known input](#sample-run-for-known-input), above, and so can be used to quickly reproduce the results above.
+The top-level directory `test` is intended for input scripts for test purposes. Currently defined:
+
+- `tests/data-pi-all-10-streams.txt` contains the inputs used in [Sample run for known input](#sample-run-for-known-input), above, and so can be used to quickly reproduce the results above. Use:
+
+  ```bash
+  ./assess 100000 <../tests/data-pi-all-10-streams.txt
+  ```
 
 ### Result locations
 
@@ -214,6 +222,38 @@ The results show up in different subdirectories depending on the algorithm chose
 7 | Blum-Blum-Shub | `BBS` | `experiments/BBS/finalAnalysisReport.txt`
 8 | Micali-Schnorr | `MS` | `experiments/MS/finalAnalysisReport.txt`
 9 | G Using SHA-1 | `G-SHA1` | `experiments/G-SHA1/finalAnalysisReport.txt`
+
+### Bitstreams, the parameter to `assess`, and data files
+
+`assess` tests a random number generator by looking at several "bit streams" from that random number generator. The parameter to the `assess` command is the _length_ of each tested bitstream.
+
+Each tested bit stream must pass a variety of tests. Generally speaking, `assess` must test many bit streams before coming to a judgment. The practical minimum is 10 bit streams. The number of bit streams comes from your answer to this question:
+
+```console
+   How many bitstreams?
+```
+
+Data files are assumed to contain sequences of random *bits*, i.e., coin flips.  "ASCII" files contains series of `0` and `1` characters, one per bit. (Whitespace is ignored.)  "Binary" files contains series of binary bytes, with 8 bits per byte. (All bytes are taken as data.)
+
+When providing data in a file, you must provide enough data for the entire test, i.e. your file must contain `nBitStreams * lengthBitStream` bits. `lengthBitStream` comes from the command line; `nBitStreams` comes from interactive input. If you supply extra bits in your data file, that's OK; extra bits are ignored. But if you don't supply enough bits in your data file, `assess` will exit with a failure:
+
+```console
+     Statistical Testing In Progress.........
+
+ERROR:  Insufficient data in file data/data.pi.  4882 bits were read.
+free(): double free detected in tcache 2
+Aborted (core dumped)
+```
+
+For example, `data.pi` contains 1,004,882 bits of data (calculated using `tr -dc 01 <data/data.pi | wc`).  This means you can test 10 streams of 100,000 bits (ignoring the last 4,882 bits), or 100 streams of 10,000 bits, and so on.
+
+### Random Number Generators and floating-point data
+
+If you are testing a random-number generator that returns floats, you have to figure out how to turn that into a sequence of random bits. Almost always, you're using the floats to map into some other continuous or discrete distribution, and that maps some number of random bits from the float into some other number of random bits in your app. There are subtle questions about how best to do that.
+
+If you're familiar with floating-point representation, you can extract the bit sequence from a binary representation of your float, but you have to be careful to extract the right number of bits, and you must take care to avoid round-off error.
+
+If you're not very familiar with floating-point representation, it's best to find the API for your generator that will return uniformly distributed _integers_. Generate integers that are distributed uniformly over a power of two (e.g., in the range 0 to 255), and convert each integer to binary as an ASCII string. Packing into bytes is not necessary, and is tricky if your generator is not generating numbers that are distributed uniformly over the range from 0 to 255.
 
 ## Anomalies
 
