@@ -73,12 +73,12 @@ echo "Creating the subdirectories via child script."
 	if [ ! -d AlgorithmTesting/Frequency ]; then
 		./create-dir-script
 		if [ $? -ne 0 ]; then
-			echo "$PNAME: some diretory creations failed; this probably isn't a problem, but please check!"
+			echo "$PNAME: some directory creations failed; this probably isn't a problem, but please check!"
 		else
 			echo "Child script succeeded."
 		fi
 	else
-		echo "Skipping child script. An earlier step failed?"
+		echo "Skipping create-dir-script. It appears that it was already run?"
 	fi
 	) || exit $?
 
