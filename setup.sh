@@ -25,6 +25,9 @@ do not have the ability to create missing directories, and git doesn't
 record empty directories. I'd like to keep the NIST distribution pristene
 (at least for now), so you need to run this script after a clean checkout,
 before doing your first build. It won't hurt to re-run it.
+
+For testing, $PNAME --clean will remove all the subdirectories that this
+script creates.
 EOF
 }
 
@@ -52,11 +55,31 @@ function _prefix {
 	fi
 	for i in "$@" ; do echo "$PREFIX/$i" ; done
 }
-SUBDIRS=$(_prefix "$ROOTDIR" obj)
-SUBDIRS="$SUBDIRS $(_prefix "$ROOTDIR/experiments" AlgorithmTesting BBS CCG G-SHA1 LCG MODEXP MS QCG1 QCG2 XOR)"
+
+# use an array for SUBDIRS, in case ROOTDIR expansion contains spaces.
+typeset -a SUBDIRS
+SUBDIRS+=("$(_prefix "$ROOTDIR" obj)")
+for i in AlgorithmTesting BBS CCG G-SHA1 LCG MODEXP MS QCG1 QCG2 XOR; do
+	SUBDIRS+=("$(_prefix "$ROOTDIR/experiments" $i)")
+done
+
+if [[ X"$1" == "X--clean" ]]; then
+	echo "Cleaning up directory tree."
+	#
+	# expand one word per array entry, in case ROOTDIR expansion contains spaces
+	#
+	rm -rf "${SUBDIRS[@]}"
+	exit $?
+fi
+
+if [[ $# -ne 0 ]]; then
+	_error "Unrecognized arguments; use --help to get help"
+fi
 
 echo "Setting up directories in $ROOTDIR/experiments."
-for i in $SUBDIRS ; do
+
+# expand one word per entry, in case ROOTDIR expansion contains spaces
+for i in "${SUBDIRS[@]}" ; do
 	if [ ! -d "$i" ]; then
 		mkdir -p "$i" || _error "Can't create dir: $i"
         echo "Created $i."
