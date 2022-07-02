@@ -15,7 +15,7 @@
 #	See the --help output.
 #
 
-PNAME=$(basename $0)
+PNAME=$(basename "$0")
 
 function _help {
 cat <<EOF
@@ -34,11 +34,11 @@ if [ X"$1" == "X--help" ]; then
 fi
 
 function _error {
-	echo "$PNAME: $@" 1>&2
+	echo "$PNAME:" "$@" 1>&2
 	exit 1
 }
 
-ROOTDIR=$(dirname $0)/sts
+ROOTDIR=$(dirname "$0")/sts
 
 if [ ! -d "$ROOTDIR" ]; then
 	_error "STS distribution directory not found:" "$ROOTDIR/sts"
@@ -67,12 +67,11 @@ done
 
 echo "Creating the subdirectories via child script."
 	(
-	cd $ROOTDIR/experiments || _error "Can't cd: $ROOTDIR/experiments"
+	cd "$ROOTDIR/experiments" || _error "Can't cd: $ROOTDIR/experiments"
 	# this is a hack; we use the first directory created by create-dir-script
 	# as the flag to skip create-dir-script.
 	if [ ! -d AlgorithmTesting/Frequency ]; then
-		./create-dir-script
-		if [ $? -ne 0 ]; then
+		if ! ./create-dir-script; then
 			echo "$PNAME: some directory creations failed; this probably isn't a problem, but please check!"
 		else
 			echo "Child script succeeded."
