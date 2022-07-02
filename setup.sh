@@ -68,7 +68,9 @@ done
 echo "Creating the subdirectories via child script."
 	(
 	cd $ROOTDIR/experiments || _error "Can't cd: $ROOTDIR/experiments"
-	if [ -d AlgorithmTesting ]; then
+	# this is a hack; we use the first directory created by create-dir-script
+	# as the flag to skip create-dir-script.
+	if [ ! -d AlgorithmTesting/Frequency ]; then
 		./create-dir-script
 		if [ $? -ne 0 ]; then
 			echo "$PNAME: some diretory creations failed; this probably isn't a problem, but please check!"
@@ -83,5 +85,3 @@ echo "Creating the subdirectories via child script."
 echo "Directories are set up. Change directory to $ROOTDIR and say 'make'!"
 
 exit 0
-
-
