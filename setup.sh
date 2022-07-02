@@ -66,19 +66,19 @@ for i in $SUBDIRS ; do
 done
 
 echo "Creating the subdirectories via child script."
-(
-cd $ROOTDIR/experiments || _error "Can't cd: $ROOTDIR/experiments"
-if [ -d AlgorithmTesting ]; then
-    ./create-dir-script
-    if [ $? -ne 0 ]; then
-        echo "$PNAME: some diretory creations failed; this probably isn't a problem, but please check!"
-    else
-        echo "Child script succeeded."
-    fi
-else
-    echo "Skipping child script. An earlier step failed?"
-fi
-) || exit $?
+	(
+	cd $ROOTDIR/experiments || _error "Can't cd: $ROOTDIR/experiments"
+	if [ -d AlgorithmTesting ]; then
+		./create-dir-script
+		if [ $? -ne 0 ]; then
+			echo "$PNAME: some diretory creations failed; this probably isn't a problem, but please check!"
+		else
+			echo "Child script succeeded."
+		fi
+	else
+		echo "Skipping child script. An earlier step failed?"
+	fi
+	) || exit $?
 
 echo "Directories are set up. Change directory to $ROOTDIR and say 'make'!"
 
