@@ -200,10 +200,10 @@ If you are careful, you can supply answers in a text file.
 
 The top-level directory `test` is intended for input scripts for test purposes. Currently defined:
 
-- `tests/data-pi-all-10-streams.txt` contains the inputs used in [Sample run for known input](#sample-run-for-known-input), above, and so can be used to quickly reproduce the results above. Use:
+- `test/data-pi-all-10-streams.txt` contains the inputs used in [Sample run for known input](#sample-run-for-known-input), above, and so can be used to quickly reproduce the results above. Use:
 
   ```bash
-  ./assess 100000 <../tests/data-pi-all-10-streams.txt
+  ./assess 100000 <../test/data-pi-all-10-streams.txt
   ```
 
 ### Result locations
