@@ -10,12 +10,24 @@
                 A P P R O X I M A T E  E N T R O P Y   T E S T
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+#define TERMS	(1 << 14)
+
+/*
+ * One pass counts the cyclic (m+1)-bit patterns; the m-bit counts are their sums over the
+ * last bit. The terms P*log(P/n) of the sums are memoized per count P for the current n,
+ * and added in the original order.
+ */
 void
 ApproximateEntropy(int m, int n)
 {
-	int				i, j, k, r, blockSize, seqLength, powLen, index;
+	static unsigned int	*counts = NULL;
+	static long			countsSize = 0;
+	static double		*term = NULL;
+	static int			termN = -1;
+	int				i, r, blockSize, seqLength;
 	double			sum, numOfBlocks, ApEn[2], apen, chi_squared, p_value;
-	unsigned int	*P;
+	unsigned int	*P, c;
+	long			size, v;
 	
 	fprintf(stats[TEST_APEN], "\t\t\tAPPROXIMATE ENTROPY TEST\n");
 	fprintf(stats[TEST_APEN], "\t\t--------------------------------------------\n");
@@ -26,6 +38,38 @@ ApproximateEntropy(int m, int n)
 	seqLength = n;
 	r = 0;
 	
+	if ( (m < -1) || (m > 29) ) {
+		fprintf(stats[TEST_APEN], "ApEn:  Insufficient memory available.\n");
+		return;
+	}
+	/* counts of the (m+1)-bit patterns at 2^m.., then those of the m-bit patterns at 0.. */
+	size = m >= 0 ? 3L << m : 0;
+	if ( size > countsSize ) {
+		free(counts);
+		countsSize = size;
+		if ( (counts = (unsigned int *) malloc(size*sizeof(unsigned int))) == NULL ) {
+			countsSize = 0;
+			fprintf(stats[TEST_APEN], "ApEn:  Insufficient memory available.\n");
+			return;
+		}
+	}
+	if ( term == NULL ) {
+		if ( (term = (double *) malloc(TERMS*sizeof(double))) == NULL ) {
+			fprintf(stats[TEST_APEN], "ApEn:  Insufficient memory available.\n");
+			return;
+		}
+	}
+	if ( termN != n ) {
+		/* P*log(P/n) <= 0 for P <= n, so 1 marks a term not computed yet */
+		for ( i=0; i<TERMS; i++ )
+			term[i] = 1;
+		termN = n;
+	}
+	if ( m >= 0 ) {
+		cyclicWindowCounts(counts + (1L << m), m+1, n);
+		for ( v=0; v<(1L << m); v++ )
+			counts[v] = counts[(1L << m) + 2*v] + counts[(1L << m) + 2*v + 1];
+	}
 	for ( blockSize=m; blockSize<=m+1; blockSize++ ) {
 		if ( blockSize == 0 ) {
 			ApEn[0] = 0.00;
@@ -33,34 +77,23 @@ ApproximateEntropy(int m, int n)
 		}
 		else {
 			numOfBlocks = (double)seqLength;
-			powLen = (int)pow(2, blockSize+1)-1;
-			if ( (P = (unsigned int*)calloc(powLen,sizeof(unsigned int)))== NULL ) {
-				fprintf(stats[TEST_APEN], "ApEn:  Insufficient memory available.\n");
-				return;
-			}
-			for ( i=1; i<powLen-1; i++ )
-				P[i] = 0;
-			for ( i=0; i<numOfBlocks; i++ ) { /* COMPUTE FREQUENCY */
-				k = 1;
-				for ( j=0; j<blockSize; j++ ) {
-					k <<= 1;
-					if ( (int)epsilon[(i+j) % seqLength] == 1 )
-						k++;
-				}
-				P[k-1]++;
-			}
-			/* DISPLAY FREQUENCY */
+			P = blockSize == m ? counts : counts + (1L << m);
 			sum = 0.0;
-			index = (int)pow(2, blockSize)-1;
-			for ( i=0; i<(int)pow(2, blockSize); i++ ) {
-				if ( P[index] > 0 )
-					sum += P[index]*log(P[index]/numOfBlocks);
-				index++;
+			for ( v=0; v<(blockSize > 0 ? 1L << blockSize : 0); v++ ) {
+				c = P[v];
+				if ( c > 0 ) {
+					if ( c >= TERMS )
+						sum += c*log(c/numOfBlocks);
+					else {
+						if ( term[c] > 0 )
+							term[c] = c*log(c/numOfBlocks);
+						sum += term[c];
+					}
+				}
 			}
 			sum /= numOfBlocks;
 			ApEn[r] = sum;
 			r++;
-			free(P);
 		}
 	}
 	apen = ApEn[0] - ApEn[1];
@@ -83,6 +116,6 @@ ApproximateEntropy(int m, int n)
 		fprintf(stats[TEST_APEN], "\t\t--------------------------------------------\n");
 	}
 	
-	fprintf(stats[TEST_APEN], "%s\t\tp_value = %f\n\n", p_value < ALPHA ? "FAILURE" : "SUCCESS", p_value); fflush(stats[TEST_APEN]);
-	fprintf(results[TEST_APEN], "%f\n", p_value); fflush(results[TEST_APEN]);
+	fprintf(stats[TEST_APEN], "%s\t\tp_value = %f\n\n", p_value < ALPHA ? "FAILURE" : "SUCCESS", p_value);
+	fprintf(results[TEST_APEN], "%f\n", p_value);
 }

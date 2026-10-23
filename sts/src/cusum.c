@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include "../include/externs.h"
+#include "../include/utilities.h"
 #include "../include/cephes.h"
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -12,21 +13,15 @@
 void
 CumulativeSums(int n)
 {
-	int		S, sup, inf, z, zrev, k;
-	double	sum1, sum2, p_value;
+	int					S, sup, inf, z, zrev, k;
+	double				sum1, sum2, p_value;
+	const WalkSummary	*walk = walkSummary();
 
-	S = 0;
-	sup = 0;
-	inf = 0;
-	for ( k=0; k<n; k++ ) {
-		epsilon[k] ? S++ : S--;
-		if ( S > sup )
-			sup++;
-		if ( S < inf )
-			inf--;
-		z = (sup > -inf) ? sup : -inf;
-		zrev = (sup-S > S-inf) ? sup-S : S-inf;
-	}
+	S = walk->S;
+	sup = walk->sup;
+	inf = walk->inf;
+	z = (sup > -inf) ? sup : -inf;
+	zrev = (sup-S > S-inf) ? sup-S : S-inf;
 	
 	// forward
 	sum1 = 0.0;
@@ -78,6 +73,6 @@ CumulativeSums(int n)
 	if ( isNegative(p_value) || isGreaterThanOne(p_value) )
 		fprintf(stats[TEST_CUSUM], "\t\tWARNING:  P_VALUE IS OUT OF RANGE\n");
 
-	fprintf(stats[TEST_CUSUM], "%s\t\tp_value = %f\n\n", p_value < ALPHA ? "FAILURE" : "SUCCESS", p_value); fflush(stats[TEST_CUSUM]);
-	fprintf(results[TEST_CUSUM], "%f\n", p_value); fflush(results[TEST_CUSUM]);
+	fprintf(stats[TEST_CUSUM], "%s\t\tp_value = %f\n\n", p_value < ALPHA ? "FAILURE" : "SUCCESS", p_value);
+	fprintf(results[TEST_CUSUM], "%f\n", p_value);
 }

@@ -13,9 +13,10 @@
 void
 Rank(int n)
 {
-	int			N, i, k, r;
-	double		p_value, product, chi_squared, arg1, p_32, p_31, p_30, R, F_32, F_31, F_30;
-	BitSequence	**matrix = create_matrix(32, 32);
+	int				N, i, k, r, other, ranks[2];
+	double			p_value, product, chi_squared, arg1, R, F_32, F_31, F_30;
+	static double	p_32, p_31, p_30;
+	static int		ready = 0;
 	
 	N = n/(32*32);
 	if ( isZero(N) ) {
@@ -24,32 +25,35 @@ Rank(int n)
 		p_value = 0.00;
 	}
 	else {
-		r = 32;					/* COMPUTE PROBABILITIES */
-		product = 1;
-		for ( i=0; i<=r-1; i++ )
-			product *= ((1.e0-pow(2, i-32))*(1.e0-pow(2, i-32)))/(1.e0-pow(2, i-r));
-		p_32 = pow(2, r*(32+32-r)-32*32) * product;
+		if ( !ready ) {
+			r = 32;					/* COMPUTE PROBABILITIES */
+			product = 1;
+			for ( i=0; i<=r-1; i++ )
+				product *= ((1.e0-pow(2, i-32))*(1.e0-pow(2, i-32)))/(1.e0-pow(2, i-r));
+			p_32 = pow(2, r*(32+32-r)-32*32) * product;
 		
-		r = 31;
-		product = 1;
-		for ( i=0; i<=r-1; i++ )
-			product *= ((1.e0-pow(2, i-32))*(1.e0-pow(2, i-32)))/(1.e0-pow(2, i-r));
-		p_31 = pow(2, r*(32+32-r)-32*32) * product;
+			r = 31;
+			product = 1;
+			for ( i=0; i<=r-1; i++ )
+				product *= ((1.e0-pow(2, i-32))*(1.e0-pow(2, i-32)))/(1.e0-pow(2, i-r));
+			p_31 = pow(2, r*(32+32-r)-32*32) * product;
 		
-		p_30 = 1 - (p_32+p_31);
+			p_30 = 1 - (p_32+p_31);
+			ready = 1;
+		}
 		
 		F_32 = 0;
 		F_31 = 0;
-		for ( k=0; k<N; k++ ) {			/* FOR EACH 32x32 MATRIX   */
-			def_matrix(32, 32, matrix, k);
-#if (DISPLAY_MATRICES == 1)
-			display_matrix(32, 32, matrix);
-#endif
-			R = computeRank(32, 32, matrix);
-			if ( R == 32 )
-				F_32++;			/* DETERMINE FREQUENCIES */
-			if ( R == 31 )
-				F_31++;
+		for ( k=0; k<N; k+=2 ) {			/* FOR EACH 32x32 MATRIX, TWO AT A TIME */
+			other = (k+1 < N) ? k+1 : k;
+			computeRanks(epsilonWords + 16*(long)k, epsilonWords + 16*(long)other, &ranks[0], &ranks[1]);
+			for ( i=0; (i<2) && (k+i<N); i++ ) {
+				R = ranks[i];
+				if ( R == 32 )
+					F_32++;			/* DETERMINE FREQUENCIES */
+				if ( R == 31 )
+					F_31++;
+			}
 		}
 		F_30 = (double)N - (F_32+F_31);
 		
@@ -77,11 +81,7 @@ Rank(int n)
 		p_value = exp(arg1);
 		if ( isNegative(p_value) || isGreaterThanOne(p_value) )
 			fprintf(stats[TEST_RANK], "WARNING:  P_VALUE IS OUT OF RANGE.\n");
-
-		for ( i=0; i<32; i++ )				/* DEALLOCATE MATRIX  */
-			free(matrix[i]);
-		free(matrix);
 	}
-	fprintf(stats[TEST_RANK], "%s\t\tp_value = %f\n\n", p_value < ALPHA ? "FAILURE" : "SUCCESS", p_value); fflush(stats[TEST_RANK]);
-	fprintf(results[TEST_RANK], "%f\n", p_value); fflush(results[TEST_RANK]);
+	fprintf(stats[TEST_RANK], "%s\t\tp_value = %f\n\n", p_value < ALPHA ? "FAILURE" : "SUCCESS", p_value);
+	fprintf(results[TEST_RANK], "%f\n", p_value);
 }

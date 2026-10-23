@@ -4,17 +4,88 @@
 #include <math.h>
 #include <string.h>
 #include "../include/externs.h"
+#include "../include/utilities.h"
 #include "../include/cephes.h"  
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
                       L O N G E S T  R U N S  T E S T
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+/* Positions in x where length ones begin, the run running toward the low bits */
+static inline uint64_t
+runStarts(uint64_t x, int length)
+{
+	uint64_t	run = x, hit = ~0ULL;
+	int			covered = 0, step;
+
+	for ( step=1; step<=length; step*=2 ) {
+		if ( length & step ) {
+			hit &= run << covered;
+			covered += step;
+		}
+		run &= run << step;
+	}
+	return hit;
+}
+
+/* Longest run of ones inside x (63 for a word of ones) */
+static inline int
+longestInWord(uint64_t x)
+{
+	uint64_t	e[6], cur = ~0ULL, t;
+	int			i, len = 0;
+
+	e[0] = x;
+	for ( i=1; i<6; i++ )
+		e[i] = e[i-1] & (e[i-1] << (1 << (i-1)));
+	for ( i=5; i>=0; i-- ) {
+		t = cur & (e[i] << len);
+		if ( t ) {
+			cur = t;
+			len += 1 << i;
+		}
+	}
+	return len;
+}
+
+/*
+ * Longest run of ones among bits start .. start+len-1. Runs shorter than least are only
+ * known to be shorter, and the scan stops once a run longer than most has been seen.
+ */
+static int
+longestRun(long start, int len, int least, int most)
+{
+	uint64_t	x;
+	int			best = 0, run = 0, k, inner;
+
+	while ( (len > 0) && (best <= most) ) {
+		k = len < 64 ? len : 64;
+		x = bitWindow(epsilonWords, start);
+		if ( k < 64 )
+			x &= ~0ULL << (64 - k);
+		if ( x == ~0ULL )
+			run += 64;
+		else {
+			run += __builtin_clzll(~x);
+			if ( runStarts(x, least) ) {
+				inner = longestInWord(x);
+				best = inner > best ? inner : best;
+			}
+		}
+		best = run > best ? run : best;
+		if ( x != ~0ULL )
+			run = __builtin_ctzll(~x);
+		start += k;
+		len -= k;
+	}
+	return best;
+}
+
 void
 LongestRunOfOnes(int n)
 {
 	double			pval, chi2, pi[7];
-	int				run, v_n_obs, N, i, j, K, M, V[7];
+	int				v_n_obs, N, i, j, K, M, V[7];
 	unsigned int	nu[7] = { 0, 0, 0, 0, 0, 0, 0 };
 
 	if ( n < 128 ) {
@@ -58,17 +129,7 @@ LongestRunOfOnes(int n)
 	
 	N = n/M;
 	for ( i=0; i<N; i++ ) {
-		v_n_obs = 0;
-		run = 0;
-		for ( j=0; j<M; j++ ) {
-			if ( epsilon[i*M+j] == 1 ) {
-				run++;
-				if ( run > v_n_obs )
-					v_n_obs = run;
-			}
-			else
-				run = 0;
-		}
+		v_n_obs = longestRun((long)i*M, M, V[0], V[K]);
 		if ( v_n_obs < V[0] )
 			nu[0]++;
 		for ( j=0; j<=K; j++ ) {
@@ -113,6 +174,6 @@ LongestRunOfOnes(int n)
 	if ( isNegative(pval) || isGreaterThanOne(pval) )
 		fprintf(stats[TEST_LONGEST_RUN], "WARNING:  P_VALUE IS OUT OF RANGE.\n");
 
-	fprintf(stats[TEST_LONGEST_RUN], "%s\t\tp_value = %f\n\n", pval < ALPHA ? "FAILURE" : "SUCCESS", pval); fflush(stats[TEST_LONGEST_RUN]);
-	fprintf(results[TEST_LONGEST_RUN], "%f\n", pval); fflush(results[TEST_LONGEST_RUN]);
+	fprintf(stats[TEST_LONGEST_RUN], "%s\t\tp_value = %f\n\n", pval < ALPHA ? "FAILURE" : "SUCCESS", pval);
+	fprintf(results[TEST_LONGEST_RUN], "%f\n", pval);
 }
