@@ -2,16 +2,24 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "../include/externs.h"
+#include "../include/utilities.h"
 #include "../include/cephes.h"  
 
 double psi2(int m, int n);
+
+/* Counts of the cyclic windows of the current stream, for window length countsLength */
+static unsigned int	*counts = NULL;
+static long			countsSize = 0;
+static int			countsLength = -1;
 
 void
 Serial(int m, int n)
 {
 	double	p_value1, p_value2, psim0, psim1, psim2, del1, del2;
 	
+	countsLength = -1;
 	psim0 = psi2(m, n);
 	psim1 = psi2(m-1, n);
 	psim2 = psi2(m-2, n);
@@ -36,43 +44,55 @@ Serial(int m, int n)
 	fprintf(stats[TEST_SERIAL], "%s\t\tp_value1 = %f\n", p_value1 < ALPHA ? "FAILURE" : "SUCCESS", p_value1);
 	fprintf(results[TEST_SERIAL], "%f\n", p_value1);
 
-	fprintf(stats[TEST_SERIAL], "%s\t\tp_value2 = %f\n\n", p_value2 < ALPHA ? "FAILURE" : "SUCCESS", p_value2); fflush(stats[TEST_SERIAL]);
-	fprintf(results[TEST_SERIAL], "%f\n", p_value2); fflush(results[TEST_SERIAL]);
+	fprintf(stats[TEST_SERIAL], "%s\t\tp_value2 = %f\n\n", p_value2 < ALPHA ? "FAILURE" : "SUCCESS", p_value2);
+	fprintf(results[TEST_SERIAL], "%f\n", p_value2);
 }
 
+/*
+ * The counts of the m-bit patterns are those of the (m+1)-bit patterns summed over the last
+ * bit, so after the first call the next shorter length needs no pass over the stream.
+ * The squares are exact integers: while their total stays below 2^53 every partial sum of
+ * the original double loop is exact too, so the integer total converted once is that sum.
+ */
 double
 psi2(int m, int n)
 {
-	int				i, j, k, powLen;
-	double			sum, numOfBlocks;
-	unsigned int	*P;
+	long		i;
+	uint64_t	total;
+	double		sum;
 	
 	if ( (m == 0) || (m == -1) )
 		return 0.0;
-	numOfBlocks = n;
-	powLen = (int)pow(2, m+1)-1;
-	if ( (P = (unsigned int*)calloc(powLen,sizeof(unsigned int)))== NULL ) {
-		fprintf(stats[TEST_SERIAL], "Serial Test:  Insufficient memory available.\n");
-		fflush(stats[TEST_SERIAL]);
-		return 0.0;
+	if ( (m >= 1) && (countsLength == m + 1) ) {
+		for ( i=0; i<(1L << m); i++ )
+			counts[i] = counts[2*i] + counts[2*i+1];
 	}
-	for ( i=1; i<powLen-1; i++ )
-		P[i] = 0;	  /* INITIALIZE NODES */
-	for ( i=0; i<numOfBlocks; i++ ) {		 /* COMPUTE FREQUENCY */
-		k = 1;
-		for ( j=0; j<m; j++ ) {
-			if ( epsilon[(i+j)%n] == 0 )
-				k *= 2;
-			else if ( epsilon[(i+j)%n] == 1 )
-				k = 2*k+1;
+	else {
+		if ( (m >= 1) && (m <= 30) && ((1L << m) > countsSize) ) {
+			free(counts);
+			countsSize = 1L << m;
+			if ( (counts = (unsigned int *) malloc(countsSize*sizeof(unsigned int))) == NULL )
+				countsSize = 0;
 		}
-		P[k-1]++;
+		if ( (m < 1) || (m > 30) || (counts == NULL) ) {
+			fprintf(stats[TEST_SERIAL], "Serial Test:  Insufficient memory available.\n");
+			countsLength = -1;
+			return 0.0;
+		}
+		cyclicWindowCounts(counts, m, n);
 	}
-	sum = 0.0;
-	for ( i=(int)pow(2, m)-1; i<(int)pow(2, m+1)-1; i++ )
-		sum += pow(P[i], 2);
+	countsLength = m;
+	total = 0;
+	for ( i=0; i<(1L << m); i++ )
+		total += (uint64_t)counts[i] * counts[i];
+	if ( total < (1ULL << 53) )
+		sum = (double)total;
+	else {
+		sum = 0.0;
+		for ( i=0; i<(1L << m); i++ )
+			sum += pow(counts[i], 2);
+	}
 	sum = (sum * pow(2, m)/(double)n) - (double)n;
-	free(P);
 	
 	return sum;
 }

@@ -6,6 +6,11 @@
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 extern BitSequence	*epsilon;				// BIT STREAM
+
+/* epsilonWords is epsilon packed 64 bits per word: bit i of the stream is bit 63-i%64 of
+   word i/64. Bits from tp.n on are zero, and two more zero words follow the last one. */
+extern uint64_t		*epsilonWords;
+
 extern TP			tp;						// TEST PARAMETER STRUCTURE
 extern FILE			*stats[NUMOFTESTS+1];	// FILE OUTPUT STREAM
 extern FILE			*results[NUMOFTESTS+1];	// FILE OUTPUT STREAM

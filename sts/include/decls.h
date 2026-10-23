@@ -6,6 +6,7 @@
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 BitSequence	*epsilon;				// BIT STREAM
+uint64_t	*epsilonWords;			// BIT STREAM, PACKED (see externs.h)
 TP			tp;						// TEST PARAMETER STRUCTURE
 FILE		*stats[NUMOFTESTS+1];	// FILE OUTPUT STREAM
 FILE		*results[NUMOFTESTS+1];	// FILE OUTPUT STREAM

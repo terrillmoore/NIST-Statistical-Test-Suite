@@ -10,12 +10,61 @@
                          U N I V E R S A L  T E S T
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+/* log(gap)/log(2) for every gap seen so far, negative where not computed yet */
+static double	*log2Gap = NULL;
+static long		log2GapSize = 0;
+
+static int
+reserveLog2Gap(long size)
+{
+	double	*grown;
+	long	gap;
+
+	if ( size > log2GapSize ) {
+		if ( (grown = (double *)realloc(log2Gap, size * sizeof(double))) == NULL )
+			return 0;
+		log2Gap = grown;
+		for ( gap=log2GapSize; gap<size; gap++ )
+			log2Gap[gap] = -1;
+		log2GapSize = size;
+	}
+	return 1;
+}
+
+/* Reads the stream L bits at a time; bits holds the unread part of the current word, on top */
+typedef struct {
+	const uint64_t	*next;
+	uint64_t		bits;
+	int				avail;
+} BlockReader;
+
+static inline long
+nextBlock(BlockReader *r, int L)
+{
+	uint64_t	word;
+	long		value;
+
+	if ( r->avail >= L ) {
+		value = (long)(r->bits >> (64 - L));
+		r->bits <<= L;
+		r->avail -= L;
+	}
+	else {
+		word = *r->next++;
+		value = (long)((r->bits >> (64 - L)) | (word >> (64 - L + r->avail)));
+		r->bits = word << (L - r->avail);
+		r->avail += 64 - L;
+	}
+	return value;
+}
+
 void
 Universal(int n)
 {
-	int		i, j, p, L, Q, K;
-	double	arg, sqrt2, sigma, phi, sum, p_value, c;
-	long	*T, decRep;
+	int			i, p, L, Q, K;
+	double		arg, sqrt2, sigma, phi, sum, p_value, c, log2gap;
+	long		*T, decRep, gap;
+	BlockReader	reader;
 	double	expected_value[17] = { 0, 0, 0, 0, 0, 0, 5.2177052, 6.1962507, 7.1836656,
 				8.1764248, 9.1723243, 10.170032, 11.168765,
 				12.168070, 13.167693, 14.167488, 15.167379 };
@@ -43,7 +92,7 @@ Universal(int n)
 	K = (int) (floor(n/L) - (double)Q);	 		    /* BLOCKS TO TEST */
 	
 	p = (int)pow(2, L);
-	if ( (L < 6) || (L > 16) || ((double)Q < 10*pow(2, L)) ||
+	if ( (L < 6) || (L > 16) || ((double)Q < 10*pow(2, L)) || !reserveLog2Gap((long)Q + K + 1) ||
 		 ((T = (long *)calloc(p, sizeof(long))) == NULL) ) {
 		fprintf(stats[TEST_UNIVERSAL], "\t\tUNIVERSAL STATISTICAL TEST\n");
 		fprintf(stats[TEST_UNIVERSAL], "\t\t---------------------------------------------\n");
@@ -52,25 +101,25 @@ Universal(int n)
 		fprintf(stats[TEST_UNIVERSAL], "\t\t-OR- :  Unable to allocate T.\n");
 		return;
 	}
-	
 	/* COMPUTE THE EXPECTED:  Formula 16, in Marsaglia's Paper */
 	c = 0.7 - 0.8/(double)L + (4 + 32/(double)L)*pow(K, -3/(double)L)/15;
 	sigma = c * sqrt(variance[L]/(double)K);
 	sqrt2 = sqrt(2);
 	sum = 0.0;
-	for ( i=0; i<p; i++ )
-		T[i] = 0;
+	reader.next = epsilonWords + 1;
+	reader.bits = epsilonWords[0];
+	reader.avail = 64;
 	for ( i=1; i<=Q; i++ ) {		/* INITIALIZE TABLE */
-		decRep = 0;
-		for ( j=0; j<L; j++ )
-			decRep += epsilon[(i-1)*L+j] * (long)pow(2, L-1-j);
+		decRep = nextBlock(&reader, L);
 		T[decRep] = i;
 	}
 	for ( i=Q+1; i<=Q+K; i++ ) { 	/* PROCESS BLOCKS */
-		decRep = 0;
-		for ( j=0; j<L; j++ )
-			decRep += epsilon[(i-1)*L+j] * (long)pow(2, L-1-j);
-		sum += log(i - T[decRep])/log(2);
+		decRep = nextBlock(&reader, L);
+		gap = i - T[decRep];
+		log2gap = log2Gap[gap];
+		if ( log2gap < 0 )
+			log2gap = log2Gap[gap] = log(gap)/log(2);
+		sum += log2gap;
 		T[decRep] = i;
 	}
 	phi = (double)(sum/(double)K);
@@ -95,8 +144,8 @@ Universal(int n)
 	if ( isNegative(p_value) || isGreaterThanOne(p_value) )
 		fprintf(stats[TEST_UNIVERSAL], "\t\tWARNING:  P_VALUE IS OUT OF RANGE\n");
 
-	fprintf(stats[TEST_UNIVERSAL], "%s\t\tp_value = %f\n\n", p_value < ALPHA ? "FAILURE" : "SUCCESS", p_value); fflush(stats[TEST_UNIVERSAL]);
-	fprintf(results[TEST_UNIVERSAL], "%f\n", p_value); fflush(results[TEST_UNIVERSAL]);
+	fprintf(stats[TEST_UNIVERSAL], "%s\t\tp_value = %f\n\n", p_value < ALPHA ? "FAILURE" : "SUCCESS", p_value);
+	fprintf(results[TEST_UNIVERSAL], "%f\n", p_value);
 	
 	free(T);
 }

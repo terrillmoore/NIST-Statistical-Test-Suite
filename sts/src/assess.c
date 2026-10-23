@@ -52,8 +52,10 @@
 
 void	partitionResultFile(int numOfFiles, int numOfSequences, int option, int testNameID);
 void	postProcessResults(int option);
-int		cmp(const double *a, const double *b);
-int		computeMetrics(char *s, int test);
+int		computeMetrics(const float *values, int test);
+
+/* p-values of each test's data<k>.txt files, numOfBitStreams per file */
+static float	*partitioned[NUMOFTESTS+1];
 
 int
 main(int argc, char *argv[])
@@ -112,97 +114,109 @@ main(int argc, char *argv[])
 	return 1;
 }
 
+static void
+fileNotFound(const char *name)
+{
+	printf("%s", name);
+	printf(" -- file not found. Exiting program.\n");
+	exit(-1);
+}
+
+static char *
+readTextFile(const char *name)
+{
+	FILE	*fp;
+	char	*text = NULL, *grown;
+	size_t	size = 0, used = 0, got;
+
+	if ( (fp = fopen(name, "r")) == NULL )
+		return NULL;
+	do {
+		if ( size - used < 65536 ) {
+			size = 2*size + 65536;
+			if ( (grown = (char *)realloc(text, size + 1)) == NULL ) {
+				free(text);
+				fclose(fp);
+				return NULL;
+			}
+			text = grown;
+		}
+		got = fread(text + used, 1, size - used, fp);
+		used += got;
+	} while ( got > 0 );
+	fclose(fp);
+	text[used] = '\0';
+
+	return text;
+}
+
+/* One fscanf(fp, "%f", c) on the text at *pos; when nothing can be read c keeps its value */
+static void
+scanValue(char **pos, float *c)
+{
+	char	*end;
+	float	value = strtof(*pos, &end);
+
+	if ( end != *pos ) {
+		*c = value;
+		*pos = end;
+	}
+}
+
 void
 partitionResultFile(int numOfFiles, int numOfSequences, int option, int testNameID)
 { 
-	int		i, k, m, j, start, end, num, numread;
-	float	c;
-	FILE	**fp = (FILE **)calloc(numOfFiles+1, sizeof(FILE *));
-	int		*results = (int *)calloc(numOfFiles, sizeof(int *));
-	char	*s[MAXFILESPERMITTEDFORPARTITION];
-	char	resultsDir[200];
-	
-	for ( i=0; i<MAXFILESPERMITTEDFORPARTITION; i++ )
-		s[i] = (char*)calloc(200, sizeof(char));
+	int		i, num, len;
+	long	k, total = (long)numOfFiles * numOfSequences;
+	size_t	used;
+	float	c = 0, *read, *values;
+	char	resultsDir[200], s[200], *text, *pos, *buffer;
+	FILE	*fp;
 	
 	sprintf(resultsDir, "experiments/%s/%s/results.txt", generatorDir[option], testNames[testNameID]);
-	
-	if ( (fp[numOfFiles] = fopen(resultsDir, "r")) == NULL ) {
-		printf("%s", resultsDir);
-		printf(" -- file not found. Exiting program.\n");
+	if ( (text = readTextFile(resultsDir)) == NULL )
+		fileNotFound(resultsDir);
+	if ( ((read = (float *)malloc((total+1)*sizeof(float))) == NULL) ||
+		 ((values = (float *)malloc((total+1)*sizeof(float))) == NULL) ||
+		 ((buffer = (char *)malloc((size_t)numOfSequences*64 + 1)) == NULL) ) {
+		printf("Final Analysis Report aborted due to insufficient workspace\n");
 		exit(-1);
 	}
 	
+	/* the values go out in turn to data1 .. data<numOfFiles>, one round per sequence */
+	pos = text;
+	for ( k=0; k<total; k++ ) {
+		scanValue(&pos, &c);
+		read[k] = c;
+	}
 	for ( i=0; i<numOfFiles; i++ ) {
-		if ( i < 10 )
-			sprintf(s[i], "experiments/%s/%s/data%1d.txt", generatorDir[option], testNames[testNameID], i+1);
-		else if (i < 100)
-			sprintf(s[i], "experiments/%s/%s/data%2d.txt", generatorDir[option], testNames[testNameID], i+1);
-		else
-			sprintf(s[i], "experiments/%s/%s/data%3d.txt", generatorDir[option], testNames[testNameID], i+1);
-	}
-	numread = 0;
-	m = numOfFiles/20;
-	if ( (numOfFiles%20) != 0 )
-		m++;
-	for ( i=0; i<numOfFiles; i++ ) {
-		if ( (fp[i] = fopen(s[i], "w")) == NULL ) {
-			printf("%s", s[i]);
-			printf(" -- file not found. Exiting program.\n");
-			exit(-1);
+		used = 0;
+		for ( num=0; num<numOfSequences; num++ ) {
+			len = sprintf(buffer + used, "%f\n", read[(long)num*numOfFiles + i]);
+			values[(long)i*numOfSequences + num] = strtof(buffer + used, NULL);
+			used += len;
 		}
-		fclose(fp[i]);
+		sprintf(s, "experiments/%s/%s/data%d.txt", generatorDir[option], testNames[testNameID], i+1);
+		if ( (fp = fopen(s, "w")) == NULL )
+			fileNotFound(s);
+		fwrite(buffer, 1, used, fp);
+		fclose(fp);
 	}
-	for ( num=0; num<numOfSequences; num++ ) {
-		for ( k=0; k<m; k++ ) { 			/* FOR EACH BATCH */
-			
-			start = k*20;		/* BOUNDARY SEGMENTS */
-			end   = k*20+19;
-			if ( k == (m-1) )
-				end = numOfFiles-1;
-			
-			for ( i=start; i<=end; i++ ) {		/* OPEN FILE */
-				if ( (fp[i] = fopen(s[i], "a")) == NULL ) {
-					printf("%s", s[i]);
-					printf(" -- file not found. Exiting program.\n");
-					exit(-1);
-				}
-			}
-			
-			for ( j=start; j<=end; j++ ) {		/* POPULATE FILE */
-				fscanf(fp[numOfFiles], "%f", &c);
-				fprintf(fp[j], "%f\n", c);
-				numread++;
-			}
-
-			for ( i=start; i<=end; i++ )		/* CLOSE FILE */
-				fclose(fp[i]);
-		}
-	}
-	fclose(fp[numOfFiles]);
-	for ( i=0; i<MAXFILESPERMITTEDFORPARTITION; i++ )
-		free(s[i]);
-
-	return;
-}
-
-int
-cmp(const double *a, const double *b)
-{
-	if ( *a < *b )
-		return -1;
-	if ( *a == *b )
-		return 0;
-	return 1;
+	free(text);
+	free(read);
+	free(buffer);
+	free(partitioned[testNameID]);
+	partitioned[testNameID] = values;
 }
 
 void
 postProcessResults(int option)
 {
-	int		i, k, randomExcursionSampleSize, generalSampleSize;
+	int		i, j, k, randomExcursionSampleSize, generalSampleSize;
 	int		passRate, case1, case2, numOfFiles = 2;
 	double	p_hat;
-	char	s[200];
+	char	s[200], *text, *pos;
+	float	c, *values;
 	
 	for ( i=1; i<=NUMOFTESTS; i++ ) {		// FOR EACH TEST
 		if ( testVector[i] ) {
@@ -222,21 +236,31 @@ postProcessResults(int option)
 				else
 					numOfFiles = 2;
 				for ( k=0; k<numOfFiles; k++ ) {
-					if ( k < 10 )
-						sprintf(s, "experiments/%s/%s/data%1d.txt", generatorDir[option], testNames[i], k+1);
-					else if ( k < 100 )
-						sprintf(s, "experiments/%s/%s/data%2d.txt", generatorDir[option], testNames[i], k+1);
+					if ( partitioned[i] == NULL ) {
+						sprintf(s, "experiments/%s/%s/data%d.txt", generatorDir[option], testNames[i], k+1);
+						fileNotFound(s);
+					}
+					values = partitioned[i] + (long)k*tp.numOfBitStreams;
+					if ( (i == TEST_RND_EXCURSION) || (i == TEST_RND_EXCURSION_VAR) )
+						randomExcursionSampleSize = computeMetrics(values, i);
 					else
-						sprintf(s, "experiments/%s/%s/data%3d.txt", generatorDir[option], testNames[i], k+1);
-					if ( (i == TEST_RND_EXCURSION) || (i == TEST_RND_EXCURSION_VAR) ) 
-						randomExcursionSampleSize = computeMetrics(s,i);
-					else
-						generalSampleSize = computeMetrics(s,i);
+						generalSampleSize = computeMetrics(values, i);
 				}
 			}
 			else {
 				sprintf(s, "experiments/%s/%s/results.txt", generatorDir[option], testNames[i]);
-				generalSampleSize = computeMetrics(s,i);
+				if ( ((text = readTextFile(s)) == NULL) ||
+					 ((values = (float *)malloc((tp.numOfBitStreams+1)*sizeof(float))) == NULL) )
+					fileNotFound(s);
+				c = 0;
+				pos = text;
+				for ( j=0; j<tp.numOfBitStreams; j++ ) {
+					scanValue(&pos, &c);
+					values[j] = c;
+				}
+				generalSampleSize = computeMetrics(values, i);
+				free(values);
+				free(text);
 			}
 		}
 	}
@@ -279,22 +303,16 @@ postProcessResults(int option)
 	fprintf(summary, "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n");
 }
 
+/* values: the numOfBitStreams p-values of one results.txt or data<k>.txt file */
 int
-computeMetrics(char *s, int test)
+computeMetrics(const float *values, int test)
 {
 	int		j, pos, count, passCount, sampleSize, expCount, proportion_threshold_min, proportion_threshold_max;
 	int		freqPerBin[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-	double	*A, *T, chi2, proportion, uniformity, p_hat, tmp;
+	double	*A, chi2, uniformity, p_hat;
 	float	c;
-	FILE	*fp;
 	
-	if ( (fp = fopen(s, "r")) == NULL ) {
-		printf("%s",s);
-		printf(" -- file not found. Exiting program.\n");
-		exit(-1);
-	}
-	
-	if ( (A = (double *)calloc(tp.numOfBitStreams, sizeof(double))) == NULL ) {
+	if ( (A = (double *)calloc(tp.numOfBitStreams+1, sizeof(double))) == NULL ) {
 		printf("Final Analysis Report aborted due to insufficient workspace\n");
 		return 0;
 	}
@@ -305,38 +323,21 @@ computeMetrics(char *s, int test)
 	sampleSize = tp.numOfBitStreams;
 	
 	if ( (test == TEST_RND_EXCURSION) || (test == TEST_RND_EXCURSION_VAR) ) { /* Special Case: Random Excursion Tests */
-		if ( (T = (double *)calloc(tp.numOfBitStreams, sizeof(double))) == NULL ) {
-			printf("Final Analysis Report aborted due to insufficient workspace\n");
-			return 0;
-		}
 		for ( j=0; j<sampleSize; j++ ) {
-			fscanf(fp, "%f", &c);
+			c = values[j];
 			if ( c > 0.000000 )
-				T[count++] = c;
+				A[count++] = c;
 		}
-		
-		if ( (A = (double *)calloc(count, sizeof(double))) == NULL ) {
-			printf("Final Analysis Report aborted due to insufficient workspace\n");
-			return 0;
-		}
-		
-		for ( j=0; j<count; j++ )
-			A[j] = T[j];
 		
 		sampleSize = count;
 		count = 0;
 		for ( j=0; j<sampleSize; j++ )
 			if ( A[j] < ALPHA )
 				count++;
-		free(T);
 	}
 	else {
-		if ( (A = (double *)calloc(sampleSize, sizeof(double))) == NULL ) {
-			printf("Final Analysis Report aborted due to insufficient workspace\n");
-			return 0;
-		}
 		for ( j=0; j<sampleSize; j++ ) {
-			fscanf(fp, "%f", &c);
+			c = values[j];
 			if ( c < ALPHA )
 				count++;
 			A[j] = c;
@@ -351,9 +352,8 @@ computeMetrics(char *s, int test)
 	proportion_threshold_max = (p_hat + 3.0 * sqrt((p_hat*ALPHA)/sampleSize)) * sampleSize;
 	proportion_threshold_min = (p_hat - 3.0 * sqrt((p_hat*ALPHA)/sampleSize)) * sampleSize;
 	
-	/* Compute Metric 2: Histogram */
+	/* Compute Metric 2: Histogram (the bin counts do not depend on the order) */
 	
-	qsort((void *)A, sampleSize, sizeof(double), (void *)cmp);
 	for ( j=0; j<sampleSize; j++ ) {
 		pos = (int)floor(A[j]*10);
 		if ( pos == 10 )
@@ -388,7 +388,6 @@ computeMetrics(char *s, int test)
 	else
 		fprintf(summary, "%4d/%-4d    %s\n", passCount, sampleSize, testNames[test]);
 	
-	fclose(fp);
 	free(A);
 	
 	return sampleSize;

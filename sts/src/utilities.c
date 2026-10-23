@@ -4,12 +4,25 @@ U T I L I T I E S
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 #include <time.h>
 #include "../include/externs.h"
 #include "../include/utilities.h"
 #include "../include/generators.h"
 #include "../include/stat_fncs.h"
+
+#define ASCII_BUFFER	(1 << 20)
+
+static long				wordsAllocated;
+static int				onesCount;
+static unsigned long	sequenceId;
+
+static unsigned char	*asciiBuffer;
+static size_t			asciiStart, asciiEnd;
+static int				asciiAtEnd;
+
+static void	runTests(void);
 
 int
 displayGeneratorOptions()
@@ -256,75 +269,205 @@ fileBasedBitStreams(char *streamFile)
 }
 
 
+static int
+allocateSequence(void)
+{
+	long	words = ((long)tp.n + 63) / 64 + 2;
+
+	if ( words > wordsAllocated ) {
+		free(epsilonWords);
+		if ( (epsilonWords = (uint64_t *) calloc(words, sizeof(uint64_t))) == NULL ) {
+			wordsAllocated = 0;
+			return 0;
+		}
+		wordsAllocated = words;
+	}
+	return 1;
+}
+
+
+/* Called once the packed words of a new stream are in place */
+static void
+sequenceLoaded(void)
+{
+	long	full = tp.n / 64, words = ((long)tp.n + 63) / 64;
+
+	if ( tp.n % 64 )
+		epsilonWords[full] &= ~0ULL << (64 - tp.n % 64);
+	epsilonWords[words] = 0;
+	epsilonWords[words+1] = 0;
+	onesCount = popcountWords(epsilonWords, words);
+	sequenceId++;
+}
+
+
+static inline uint64_t
+load64be(const unsigned char *p)
+{
+	return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) | ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
+		   ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) | ((uint64_t)p[6] << 8) | (uint64_t)p[7];
+}
+
+
+static inline uint64_t
+load64le(const unsigned char *p)
+{
+	return (uint64_t)p[0] | ((uint64_t)p[1] << 8) | ((uint64_t)p[2] << 16) | ((uint64_t)p[3] << 24) |
+		   ((uint64_t)p[4] << 32) | ((uint64_t)p[5] << 40) | ((uint64_t)p[6] << 48) | ((uint64_t)p[7] << 56);
+}
+
+
+static void
+fillAsciiBuffer(FILE *fp)
+{
+	size_t	left = asciiEnd - asciiStart;
+
+	memmove(asciiBuffer, asciiBuffer + asciiStart, left);
+	asciiStart = 0;
+	asciiEnd = left;
+	asciiEnd += fread(asciiBuffer + asciiEnd, 1, ASCII_BUFFER - asciiEnd, fp);
+	if ( asciiEnd < ASCII_BUFFER )
+		asciiAtEnd = 1;
+	/* past the end of the data the buffer reads as blanks */
+	memset(asciiBuffer + asciiEnd, ' ', 8);
+}
+
+
+/* The top bit of each byte of the eight characters in x that is not a 0 or a 1 */
+static inline uint64_t
+nonDigits(uint64_t x)
+{
+	uint64_t	y = (x ^ 0x3030303030303030ULL) & 0xFEFEFEFEFEFEFEFEULL;
+
+	return (((y & 0x7F7F7F7F7F7F7F7FULL) + 0x7F7F7F7F7F7F7F7FULL) | y) & 0x8080808080808080ULL;
+}
+
+
+/* The low bits of the eight characters in x as one byte, the first character on top */
+static inline uint64_t
+digitByte(uint64_t x)
+{
+	return ((x & 0x0101010101010101ULL) * 0x8040201008040201ULL) >> 56;
+}
+
+
+/* Reads the next n digits into epsilonWords, skipping whitespace; returns the count read */
+static int
+readAsciiBits(FILE *fp, int n)
+{
+	uint64_t			acc = 0, x, nondigit, b, bad, v;
+	int					got = 0, accBits = 0, lead, take, r, j;
+	long				k = 0;
+	const unsigned char	*p;
+
+	while ( got < n ) {
+		if ( asciiStart + 64 > asciiEnd && !asciiAtEnd )
+			fillAsciiBuffer(fp);
+		if ( asciiStart >= asciiEnd )
+			break;
+		p = asciiBuffer + asciiStart;
+		x = load64le(p);
+		nondigit = nonDigits(x);
+		if ( !nondigit && (n - got >= 64) && (asciiStart + 64 <= asciiEnd) && !nonDigits(load64le(p + 56)) ) {
+			/* 64 digits in a row, as in files with long lines */
+			v = digitByte(x);
+			bad = 0;
+			for ( j=8; j<64; j+=8 ) {
+				x = load64le(p + j);
+				bad |= nonDigits(x);
+				v = (v << 8) | digitByte(x);
+			}
+			if ( !bad ) {
+				epsilonWords[k++] = accBits ? (acc << (64 - accBits)) | (v >> accBits) : v;
+				acc = v & ((1ULL << accBits) - 1);
+				got += 64;
+				asciiStart += 64;
+				continue;
+			}
+			x = load64le(p);
+		}
+		lead = nondigit ? __builtin_ctzll(nondigit) >> 3 : 8;
+		take = lead < n - got ? lead : n - got;
+		if ( take > 0 ) {
+			b = digitByte(x) >> (8 - take);
+			if ( accBits + take < 64 ) {
+				acc = (acc << take) | b;
+				accBits += take;
+			}
+			else {
+				r = 64 - accBits;
+				epsilonWords[k++] = (acc << r) | (b >> (take - r));
+				accBits = take - r;
+				acc = b & ((1ULL << accBits) - 1);
+			}
+			got += take;
+			asciiStart += take;
+		}
+		if ( take == lead && lead < 8 )
+			asciiStart++;
+	}
+	if ( accBits > 0 )
+		epsilonWords[k] = acc << (64 - accBits);
+	return got;
+}
+
+
 void
 readBinaryDigitsInASCIIFormat(FILE *fp, char *streamFile)
 {
-	int		i, j, num_0s, num_1s, bitsRead, bit;
+	int		i, bitsRead;
 	
-	if ( (epsilon = (BitSequence *) calloc(tp.n, sizeof(BitSequence))) == NULL ) {
+	if ( !allocateSequence() ||
+		 ((asciiBuffer == NULL) && ((asciiBuffer = (unsigned char *) malloc(ASCII_BUFFER + 8)) == NULL)) ) {
 		printf("BITSTREAM DEFINITION:  Insufficient memory available.\n");
 		printf("Statistical Testing Aborted!\n");
 		return;
 	}
+	asciiStart = asciiEnd = 0;
+	asciiAtEnd = 0;
 	printf("     Statistical Testing In Progress.........\n\n");   
 	for ( i=0; i<tp.numOfBitStreams; i++ ) {
-		num_0s = 0;
-		num_1s = 0;
-		bitsRead = 0;
-		for ( j=0; j<tp.n; j++ ) {
-			if ( fscanf(fp, "%1d", &bit) == EOF ) {
-				printf("ERROR:  Insufficient data in file %s.  %d bits were read.\n", streamFile, bitsRead);
-				fclose(fp);
-				free(epsilon);
-				return;
-			}
-			else {
-				bitsRead++;
-				if ( bit == 0 ) 
-					num_0s++;
-				else 
-					num_1s++;
-				epsilon[j] = bit;
-			}
+		bitsRead = readAsciiBits(fp, tp.n);
+		if ( bitsRead < tp.n ) {
+			printf("ERROR:  Insufficient data in file %s.  %d bits were read.\n", streamFile, bitsRead);
+			break;
 		}
-		fprintf(freqfp, "\t\tBITSREAD = %d 0s = %d 1s = %d\n", bitsRead, num_0s, num_1s);
-		nist_test_suite();
+		sequenceLoaded();
+		fprintf(freqfp, "\t\tBITSREAD = %d 0s = %d 1s = %d\n", tp.n, tp.n - onesCount, onesCount);
+		runTests();
 	}
-	free(epsilon);
 }
 
 
 void
 readHexDigitsInBinaryFormat(FILE *fp)
 {
-	int		i, done, num_0s, num_1s, bitsRead;
-	BYTE	buffer[4];
+	int				i;
+	long			k, full = tp.n / 64;
+	size_t			streamBytes = ((size_t)tp.n + 31) / 32 * 4;
+	unsigned char	*buffer = NULL;
 	
-	if ( (epsilon = (BitSequence *) calloc(tp.n,sizeof(BitSequence))) == NULL ) {
+	if ( !allocateSequence() ||
+		 ((buffer = (unsigned char *) calloc(streamBytes + 8, 1)) == NULL) ) {
 		printf("BITSTREAM DEFINITION:  Insufficient memory available.\n");
 		return;
 	}
 
 	printf("     Statistical Testing In Progress.........\n\n");   
 	for ( i=0; i<tp.numOfBitStreams; i++ ) {
-		num_0s = 0;
-		num_1s = 0;
-		bitsRead = 0;
-		done = 0;
-		do {
-			if ( fread(buffer, sizeof(unsigned char), 4, fp) != 4 ) {
-				printf("READ ERROR:  Insufficient data in file.\n");
-				free(epsilon);
-				return;
-			}
-			done = convertToBits(buffer, 32, tp.n, &num_0s, &num_1s, &bitsRead);
-		} while ( !done );
-		fprintf(freqfp, "\t\tBITSREAD = %d 0s = %d 1s = %d\n", bitsRead, num_0s, num_1s);
-		
-		nist_test_suite();
-		
+		if ( fread(buffer, 1, streamBytes, fp) != streamBytes ) {
+			printf("READ ERROR:  Insufficient data in file.\n");
+			break;
+		}
+		for ( k=0; k<full; k++ )
+			epsilonWords[k] = load64be(buffer + 8*k);
+		if ( tp.n % 64 )
+			epsilonWords[full] = load64be(buffer + 8*full);
+		sequenceLoaded();
+		fprintf(freqfp, "\t\tBITSREAD = %d 0s = %d 1s = %d\n", tp.n, tp.n - onesCount, onesCount);
+		runTests();
 	}
-	free(epsilon);
+	free(buffer);
 }
 
 
@@ -460,8 +603,8 @@ invokeTestSuite(int option, char *streamFile)
 }
 
 
-void
-nist_test_suite()
+static void
+runTests(void)
 {
 	if ( (testVector[0] == 1) || (testVector[TEST_FREQUENCY] == 1) ) 
 		Frequency(tp.n);
@@ -507,4 +650,219 @@ nist_test_suite()
 	
 	if ( (testVector[0] == 1) || (testVector[TEST_LINEARCOMPLEXITY] == 1) )
 		LinearComplexity(tp.linearComplexitySequenceLength, tp.n);
+}
+
+
+/* Entry point for the built-in generators, which fill only epsilon */
+void
+nist_test_suite()
+{
+	long		i, k, words = ((long)tp.n + 63) / 64;
+	uint64_t	w;
+
+	if ( !allocateSequence() ) {
+		printf("BITSTREAM DEFINITION:  Insufficient memory available.\n");
+		return;
+	}
+	for ( k=0; k<words; k++ ) {
+		w = 0;
+		for ( i=64*k; (i<64*k+64) && (i<tp.n); i++ )
+			if ( epsilon[i] )
+				w |= 1ULL << (63 - (i - 64*k));
+		epsilonWords[k] = w;
+	}
+	sequenceLoaded();
+	runTests();
+}
+
+
+int
+sequenceOnes(void)
+{
+	return onesCount;
+}
+
+
+int
+popcountWords(const uint64_t *w, long count)
+{
+	long		i, chunk;
+	uint64_t	x, acc;
+	int			total = 0;
+
+	while ( count > 0 ) {
+		/* byte counters overflow after 31 words */
+		chunk = count < 31 ? count : 31;
+		acc = 0;
+		for ( i=0; i<chunk; i++ ) {
+			x = w[i];
+			x = x - ((x >> 1) & 0x5555555555555555ULL);
+			x = (x & 0x3333333333333333ULL) + ((x >> 2) & 0x3333333333333333ULL);
+			acc += (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0FULL;
+		}
+		acc = (acc & 0x00FF00FF00FF00FFULL) + ((acc >> 8) & 0x00FF00FF00FF00FFULL);
+		total += (int)((acc * 0x0001000100010001ULL) >> 48);
+		w += chunk;
+		count -= chunk;
+	}
+	return total;
+}
+
+
+/* Ones among bits start .. start+len-1 of a packed array */
+int
+rangeOnes(const uint64_t *w, long start, long len)
+{
+	long	first, last, end = start + len;
+
+	if ( len <= 0 )
+		return 0;
+	first = start >> 6;
+	last = (end - 1) >> 6;
+	if ( first == last )
+		return popcount64((w[first] << (start & 63)) >> (64 - len));
+	return popcount64(w[first] << (start & 63)) + popcountWords(w + first + 1, last - first - 1) +
+		   popcount64(w[last] >> ((64 - (end & 63)) & 63));
+}
+
+
+#define SPAN	25		/* visits to the states -SPAN..SPAN are counted */
+
+/* A cycle ends: file its visits to -4..-1, 1..4 by count and start counting again */
+static void
+closeCycle(WalkSummary *ws, const int *visits, int *start)
+{
+	int		i, x, c;
+
+	for ( i=0; i<8; i++ ) {
+		x = i < 4 ? i-4 : i-3;
+		c = visits[SPAN+x] - start[i];
+		ws->cycles[c < 5 ? c : 5][i]++;
+		start[i] = visits[SPAN+x];
+	}
+}
+
+
+/* Steps taken one at a time, from the top bit of bits down */
+static void
+walkSteps(WalkSummary *ws, int *visits, int *start, int *S, int *sup, int *inf, uint64_t bits, int count)
+{
+	int		s = *S;
+
+	for ( ; count>0; count--, bits<<=1 ) {
+		s += (bits >> 63) ? 1 : -1;
+		*sup = s > *sup ? s : *sup;
+		*inf = s < *inf ? s : *inf;
+		if ( (s >= -SPAN) && (s <= SPAN) ) {
+			visits[SPAN+s]++;
+			if ( s == 0 )
+				closeCycle(ws, visits, start);
+		}
+	}
+	*S = s;
+}
+
+
+/* Shared by CumulativeSums, RandomExcursions and RandomExcursionsVariant; computed once per stream */
+const WalkSummary *
+walkSummary(void)
+{
+	static WalkSummary		ws;
+	static unsigned long	id = 0;
+	static signed char		sum8[256], max8[256], min8[256];
+	static unsigned char	hits8[256][17];		/* hits8[b][d]: steps of byte b that end d-8 above its start */
+	static int				ready = 0;
+	static int				*atWord = NULL;		/* S before each whole word */
+	static long				atWordSize = 0;
+	int						*grown;
+	uint64_t	x;
+	long		k, full = tp.n / 64;
+	int			S = 0, sup = 0, inf = 0, visits[2*SPAN+1], start[8];
+	int			i, j, b, d, t, hi, lo, ends;
+
+	if ( id == sequenceId )
+		return &ws;
+	if ( full + 1 > atWordSize ) {
+		if ( (grown = (int *)realloc(atWord, (full + 1) * sizeof(int))) == NULL ) {
+			printf("Partial sums:  Insufficient memory available.\n");
+			exit(-1);
+		}
+		atWord = grown;
+		atWordSize = full + 1;
+	}
+	if ( !ready ) {
+		memset(hits8, 0, sizeof(hits8));
+		for ( b=0; b<256; b++ ) {
+			t = 0;
+			hi = -8;
+			lo = 8;
+			for ( j=7; j>=0; j-- ) {
+				t += ((b >> j) & 1) ? 1 : -1;
+				hits8[b][t+8]++;
+				if ( t > hi )
+					hi = t;
+				if ( t < lo )
+					lo = t;
+			}
+			sum8[b] = t;
+			max8[b] = hi;
+			min8[b] = lo;
+		}
+		ready = 1;
+	}
+	memset(&ws, 0, sizeof(ws));
+	memset(visits, 0, sizeof(visits));
+	memset(start, 0, sizeof(start));
+
+	/* S at the word boundaries first; the extremes of those are bounds the words must beat */
+	for ( k=0; k<full; k++ ) {
+		atWord[k] = S;
+		S += 2*popcount64(epsilonWords[k]) - 64;
+		sup = S > sup ? S : sup;
+		inf = S < inf ? S : inf;
+	}
+	atWord[full] = S;
+
+	/*
+	 * Over 64 steps from atWord[k] to atWord[k+1] the walk stays within half the sum of the
+	 * two, plus or minus 32. Words that cannot pass the extremes found so far or come near
+	 * zero are skipped. Near zero a byte adds its visits from a table, unless it reaches zero
+	 * itself and so may end a cycle.
+	 */
+	for ( k=0; k<full; k++ ) {
+		S = atWord[k];
+		ends = S + atWord[k+1];
+		if ( ((ends > 82) || (ends < -82)) && (ends + 64 <= 2*sup) && (ends - 64 >= 2*inf) )
+			continue;
+		x = epsilonWords[k];
+		for ( j=56; j>=0; j-=8 ) {
+			b = (int)(x >> j) & 0xFF;
+			t = S + max8[b];
+			sup = t > sup ? t : sup;
+			t = S + min8[b];
+			inf = t < inf ? t : inf;
+			if ( (S >= -8) && (S <= 8) && hits8[b][8-S] )
+				walkSteps(&ws, visits, start, &S, &sup, &inf, (uint64_t)b << 56, 8);
+			else {
+				if ( (S >= -17) && (S <= 17) )
+					for ( d=0; d<17; d++ )
+						visits[SPAN+S-8+d] += hits8[b][d];
+				S += sum8[b];
+			}
+		}
+	}
+	S = atWord[full];
+	if ( tp.n % 64 )
+		walkSteps(&ws, visits, start, &S, &sup, &inf, epsilonWords[full], tp.n % 64);
+	if ( S != 0 )
+		closeCycle(&ws, visits, start);
+	ws.S = S;
+	ws.sup = sup;
+	ws.inf = inf;
+	ws.zeros = visits[SPAN];
+	for ( i=-9; i<=9; i++ )
+		ws.visits[i+9] = visits[SPAN+i];
+	id = sequenceId;
+
+	return &ws;
 }
