@@ -36,12 +36,23 @@ OverlappingTemplateMatchings(int m, int n)
 	
 	lambda = (double)(M-m+1)/pow(2,m);
 	eta = lambda/2.0;
-	sum = 0.0;
-	for ( i=0; i<K; i++ ) {			/* Compute Probabilities */
-		pi[i] = Pr(i, eta);
-		sum += pi[i];
+#if 1 //RAF: set this to 0 to have back the orginal code
+	/*
+	 * For the NIST default parameters (m=9, M=1032),
+	 * use the reference probabilities initialized in pi[].
+	 * For other template lengths, retain the original
+	 * asymptotic probability calculation.
+	 */
+	if (m != 9 || M != 1032)
+#endif
+	{
+		sum = 0.0;
+		for ( i=0; i<K; i++ ) {			/* Compute Probabilities */
+			pi[i] = Pr(i, eta);
+			sum += pi[i];
+		}
+		pi[K] = 1.0 - sum;
 	}
-	pi[K] = 1 - sum;
 
 	for ( i=0; i<N; i++ ) {
 		W_obs = 0;
